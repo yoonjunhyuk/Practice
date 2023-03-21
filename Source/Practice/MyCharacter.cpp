@@ -1,4 +1,5 @@
 #include "MyCharacter.h"
+#include "MyAnimInstance.h"
 
 // Sets default values
 AMyCharacter::AMyCharacter()
@@ -33,6 +34,14 @@ AMyCharacter::AMyCharacter()
 
 	ArmLengthSpeed = 3.0f;
 	ArmRotationSpeed = 10.0f;
+
+	GetCharacterMovement()->JumpZVelocity = 800;
+	IsAttacking = false;
+
+	MaxCombo = 4;
+	AttackEndCombo();
+
+	GetCapsuleComponent()->SetCollisionProfileName(TEXT("ABCharacter"));
 }
 
 // Called when the game starts or when spawned
@@ -74,11 +83,33 @@ void AMyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 	PlayerInputComponent->BindAction(TEXT("ViewChange"), IE_Pressed, this, &AMyCharacter::ViewChange);
+	PlayerInputComponent->BindAction(TEXT("Jump"), IE_Pressed, this, &AMyCharacter::Jump);
+	PlayerInputComponent->BindAction(TEXT("Attack"), IE_Pressed, this, &AMyCharacter::Attack);
 
 	PlayerInputComponent->BindAxis(TEXT("UpDown"), this, &AMyCharacter::UpDown);
 	PlayerInputComponent->BindAxis(TEXT("LeftRight"), this, &AMyCharacter::LeftRight);
 	PlayerInputComponent->BindAxis(TEXT("LookUp"), this, &AMyCharacter::LookUp);
 	PlayerInputComponent->BindAxis(TEXT("Turn"), this, &AMyCharacter::Turn);
+}
+
+void AMyCharacter::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	MyAnim = Cast<UMyAnimInstance>(GetMesh()->GetAnimInstance());
+	MyAnim->OnMontageEnded.AddDynamic(this, &AMyCharacter::OnAttackMontageEnded);
+
+	MyAnim->OnNextAttackCheck.AddLambda([this]() -> void {
+		CanNextCombo = false;
+
+		if (IsComboInputOn)
+		{
+			AttackStartCombo();
+			MyAnim->JumpToAttackMontageSection(CurrentCombo);
+		}
+	});
+
+	MyAnim->OnAttackHitCheck.AddUObject(this, &AMyCharacter::AttackCheck);
 }
 
 void AMyCharacter::UpDown(float value)
@@ -178,4 +209,75 @@ void AMyCharacter::ViewChange()
 		SetControlMode(EControlMode::GTA);
 		break;
 	}
+}
+
+void AMyCharacter::Attack()
+{
+	if (IsAttacking)
+	{
+		if (CanNextCombo)
+		{
+			IsComboInputOn = true;
+		}
+	}
+	else
+	{
+		AttackStartCombo();
+		MyAnim->PlayAttackMontage();
+		MyAnim->JumpToAttackMontageSection(CurrentCombo);
+		IsAttacking = true;
+	}
+}
+
+void AMyCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	IsAttacking = false;
+	AttackEndCombo();
+}
+
+void AMyCharacter::AttackStartCombo()
+{
+	CanNextCombo = true;
+	IsComboInputOn = false;
+	CurrentCombo = FMath::Clamp<int32>(CurrentCombo + 1, 1, MaxCombo);
+}
+
+void AMyCharacter::AttackEndCombo()
+{
+	IsComboInputOn = false;
+	CanNextCombo = false;
+	CurrentCombo = 0;
+}
+
+void AMyCharacter::AttackCheck()
+{
+	FHitResult HitResult;
+	FCollisionQueryParams Params(NAME_None, false, this);
+	bool bResult = GetWorld()->SweepSingleByChannel(
+		HitResult,
+		GetActorLocation(),
+		GetActorLocation() + GetActorForwardVector() * 200,
+		FQuat::Identity,
+		ECollisionChannel::ECC_GameTraceChannel2,
+		FCollisionShape::MakeSphere(50),
+		Params
+	);
+
+	if (bResult)
+	{
+		if (HitResult.Actor.IsValid())
+		{
+			PLOG(Warning, TEXT("Hit Actor Name : %s"), *HitResult.Actor->GetName());
+
+			FDamageEvent DamageEvent;
+			HitResult.Actor->TakeDamage(50, DamageEvent, GetController(), this);
+		}
+	}
+}
+
+float AMyCharacter::TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser)
+{
+	float FinalDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	PLOG(Warning, TEXT("Actor : %s took Damage : %f"), *GetName(), FinalDamage);
+	return FinalDamage;
 }
