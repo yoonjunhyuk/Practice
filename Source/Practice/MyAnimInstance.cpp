@@ -36,7 +36,6 @@ void UMyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 void UMyAnimInstance::PlayAttackMontage()
 {
 	Montage_Play(AttackMontage, 1.0f);
-	// wienf
 }
 
 void UMyAnimInstance::AnimNotify_AttackHitCheck()
